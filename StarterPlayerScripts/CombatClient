@@ -1,0 +1,55 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local combatEvent = ReplicatedStorage:WaitForChild("CombatEvent")
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+
+local isBattling = false
+
+-- [수정됨] 카메라 위치 조정 (더 뒤로, 오른쪽에서)
+local CAM_OFFSET = Vector3.new(-8, 6, 15) 
+
+combatEvent.OnClientEvent:Connect(function(action, value)
+	local character = player.Character
+	if not character then return end
+
+	if action == "Start" then
+		isBattling = true
+		character:SetAttribute("IsBattling", true) 
+
+		camera.CameraType = Enum.CameraType.Scriptable
+
+		local rootPart = character:WaitForChild("HumanoidRootPart")
+
+		-- 캐릭터 위치가 서버에서 강제로 이동되었을 수 있으니 잠깐 대기 후 카메라 잡기
+		task.wait(0.1) 
+
+		local targetPos = rootPart.Position + CAM_OFFSET
+
+		-- 줌인 효과
+		local tweenInfo = TweenInfo.new(1, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
+		local tween = TweenService:Create(camera, tweenInfo, {CFrame = CFrame.new(targetPos, rootPart.Position)})
+		tween:Play()
+
+	elseif action == "End" then
+		isBattling = false
+		character:SetAttribute("IsBattling", false)
+		camera.CameraType = Enum.CameraType.Custom
+	end
+end)
+
+RunService.RenderStepped:Connect(function()
+	if isBattling and player.Character then
+		local rootPart = player.Character:FindFirstChild("HumanoidRootPart")
+		if rootPart then
+			local time = os.clock()
+			local sway = Vector3.new(math.sin(time)*0.3, math.cos(time*0.8)*0.3, 0)
+			local targetPos = rootPart.Position + CAM_OFFSET + sway
+
+			camera.CFrame = camera.CFrame:Lerp(CFrame.new(targetPos, rootPart.Position), 0.1)
+		end
+	end
+end)
