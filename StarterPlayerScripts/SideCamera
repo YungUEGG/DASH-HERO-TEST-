@@ -1,0 +1,77 @@
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+
+-- 2D 설정을 위한 변수들
+local DEPTH = 25 
+local HEIGHT_OFFSET = 2 
+local CAMERA_SIDE_OFFSET = 10 
+local FIXED_Z_AXIS = 0 
+
+camera.CameraType = Enum.CameraType.Scriptable
+
+local function updateCamera()
+	local character = player.Character
+	if character and character:FindFirstChild("HumanoidRootPart") then
+
+		-- [수정됨] 전투 중(IsBattling)이면 2D 카메라 작동 중지!
+		-- CombatClient가 카메라를 가져가도록 놔줍니다.
+		if character:GetAttribute("IsBattling") == true then
+			return 
+		end
+
+		local rootPart = character.HumanoidRootPart
+		local characterPosition = rootPart.Position
+
+		player.CameraMinZoomDistance = DEPTH
+		player.CameraMaxZoomDistance = DEPTH
+
+		local cameraPosition = Vector3.new(
+			characterPosition.X + CAMERA_SIDE_OFFSET,
+			characterPosition.Y + HEIGHT_OFFSET,
+			FIXED_Z_AXIS + DEPTH
+		)
+
+		local lookAtPosition = Vector3.new(
+			characterPosition.X + CAMERA_SIDE_OFFSET,
+			characterPosition.Y + HEIGHT_OFFSET,
+			FIXED_Z_AXIS
+		)
+
+		camera.CFrame = CFrame.new(cameraPosition, lookAtPosition)
+	end
+end
+
+local function lockMovementTo2D()
+	local character = player.Character
+	if character and character:FindFirstChild("HumanoidRootPart") and character:FindFirstChild("Humanoid") then
+		local rootPart = character.HumanoidRootPart
+		local humanoid = character.Humanoid
+
+		-- 전투 중에는 움직임 고정도 해제 (또는 전투 방식에 따라 유지)
+		-- 일단 전투 중엔 움직임 막는 건 MonsterScript가 하므로 여기선 둡니다.
+
+		if math.abs(rootPart.Position.Z - FIXED_Z_AXIS) > 0.5 then
+			rootPart.CFrame = CFrame.new(rootPart.Position.X, rootPart.Position.Y, FIXED_Z_AXIS) * rootPart.CFrame.Rotation
+		end
+
+		if character:GetAttribute("IsSliding") == true then
+			humanoid.AutoRotate = false
+			return 
+		end
+
+		humanoid.AutoRotate = false 
+
+		if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+			rootPart.CFrame = CFrame.new(rootPart.Position) * CFrame.Angles(0, math.rad(90), 0)
+		elseif UserInputService:IsKeyDown(Enum.KeyCode.D) then
+			rootPart.CFrame = CFrame.new(rootPart.Position) * CFrame.Angles(0, math.rad(-90), 0)
+		end
+	end
+end
+
+RunService.RenderStepped:Connect(updateCamera)
+RunService.Stepped:Connect(lockMovementTo2D)
