@@ -1,0 +1,309 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
+local combatEvent = ReplicatedStorage:WaitForChild("CombatEvent")
+local monster = script.Parent
+local isBattleActive = false 
+
+-- ==============================================================================
+-- [설정] 몬스터 설정 및 스킬 쿨타임 (여기서 쉽게 수정하세요!)
+-- ==============================================================================
+local MONSTER_CONFIG = {
+	name = "Red Cube",
+	maxHP = 20,
+	atk = 5,
+	def = 1,
+	maxSP = 3,      -- 몬스터 슬롯 개수
+	startSP = 1,    -- 전투 시작 시 몬스터가 가지고 있는 SP
+	spRegen = 1,    -- 턴마다 회복하는 SP 양
+	respawnTime = 5 -- 죽은 뒤 리스폰 시간 (초)
+}
+
+-- 몬스터 스킬 설정
+local SKILL_CONFIG = {
+	ATK = {cost = 1}, 
+	BLK = {cost = 1}, 
+	SPC = {
+		cost = 2,           
+		minTurn = 2,        -- 2번째 턴부터 사용 가능
+		cooldown = 2        -- 사용 후 2턴 쿨타임
+	}
+}
+
+-- [추가됨] 플레이어 스킬 설정 (플레이어도 쿨타임 적용)
+local PLAYER_SKILL_CONFIG = {
+	SPC = {
+		cost = 2,
+		minTurn = 2,    -- 플레이어도 2번째 턴부터 스페셜 가능
+		cooldown = 2    -- 사용 후 2턴 쿨타임
+	}
+}
+
+-- ==============================================================================
+
+-- 플레이어의 스탯 (나중엔 데이터스토어 등에서 관리)
+local PLAYER_STATS = {
+	maxHP = 40,
+	currentHP = 40,
+	atk = 8,
+	def = 2
+}
+
+-- 전투 진행 상태 저장소
+local battleState = {} 
+
+--------------------------------------------------------------------------------
+-- 몬스터 리스폰 시스템
+--------------------------------------------------------------------------------
+local function respawnMonster()
+	-- 1. 몬스터 숨기기
+	monster.Transparency = 1
+	monster.CanCollide = false
+	monster.Anchored = true
+
+	-- 2. 대기
+	task.wait(MONSTER_CONFIG.respawnTime)
+
+	-- 3. 몬스터 다시 등장
+	monster.Transparency = 0
+	monster.CanCollide = true
+	monster.Color = Color3.fromRGB(255, 0, 0) -- 원래 색 복구
+	isBattleActive = false 
+	print("♻️ 몬스터가 리스폰되었습니다!")
+end
+
+--------------------------------------------------------------------------------
+-- 거리 벌리기 (Reposition)
+--------------------------------------------------------------------------------
+local function repositionPlayer(character)
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if rootPart then
+		local direction = (rootPart.Position - monster.Position).Unit
+		local newPos = monster.Position + (direction * 15)
+		rootPart.CFrame = CFrame.new(newPos, monster.Position)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- 플레이어 고정/해제
+--------------------------------------------------------------------------------
+local function freezePlayer(character, freeze)
+	local humanoid = character:FindFirstChild("Humanoid")
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+
+	if humanoid and rootPart then
+		if freeze then
+			humanoid.WalkSpeed = 0
+			humanoid.JumpPower = 0
+			rootPart.Anchored = true
+		else
+			humanoid.WalkSpeed = 35 
+			humanoid.JumpPower = 60
+			rootPart.Anchored = false
+		end
+	end
+end
+
+--------------------------------------------------------------------------------
+-- [핵심] 몬스터 AI: SP와 쿨타임을 고려하여 패턴 생성
+--------------------------------------------------------------------------------
+local function generateMonsterActions(userId)
+	local state = battleState[userId]
+	if not state then return {} end
+
+	local mState = state.monsterStats
+	local currentSP = mState.currentSP
+	local currentTurn = state.turnCount
+	local nextSpecialTurn = state.monsterNextSpecialTurn
+
+	local pattern = {}
+	local actions = {"ATK", "BLK"} 
+
+	for i = 1, mState.maxSP do
+		local chosenAction = "-" 
+
+		-- 1. 스페셜 공격 사용 가능 조건 체크
+		if currentTurn >= SKILL_CONFIG.SPC.minTurn and 
+			currentTurn >= nextSpecialTurn and 
+			currentSP >= SKILL_CONFIG.SPC.cost then
+
+			chosenAction = "SPC"
+			currentSP = currentSP - SKILL_CONFIG.SPC.cost
+
+			-- 몬스터 쿨타임 적용
+			state.monsterNextSpecialTurn = currentTurn + SKILL_CONFIG.SPC.cooldown + 1
+
+			-- 2. 일반 공격/방어
+		elseif currentSP >= SKILL_CONFIG.ATK.cost then
+			local randomPick = actions[math.random(1, #actions)]
+			chosenAction = randomPick
+			currentSP = currentSP - SKILL_CONFIG[randomPick].cost
+		else
+			-- 3. SP 부족
+			chosenAction = "-"
+		end
+
+		table.insert(pattern, chosenAction)
+	end
+
+	return pattern
+end
+
+--------------------------------------------------------------------------------
+-- 턴 판정 및 데미지 계산 (플레이어 쿨타임 적용)
+--------------------------------------------------------------------------------
+local function resolveTurn(player, playerActions)
+	local state = battleState[player.UserId]
+	if not state then return end
+
+	local pStats = state.playerStats
+	local mStats = state.monsterStats
+	local mActions = state.monsterActions
+	local currentTurn = state.turnCount
+
+	-- 슬롯 하나씩 비교하며 데미지 계산
+	local maxSlots = math.max(#playerActions, #mActions)
+
+	for i = 1, maxSlots do
+		local pAct = playerActions[i] or "-"
+		local mAct = mActions[i] or "-"
+
+		-- [몬스터] 행동 비용 확정 차감
+		local mCost = SKILL_CONFIG[mAct] and SKILL_CONFIG[mAct].cost or 0
+		if mStats.currentSP >= mCost then
+			mStats.currentSP = mStats.currentSP - mCost
+		else
+			mAct = "-" 
+		end
+
+		-- [플레이어] 스페셜 쿨타임 및 조건 체크
+		if pAct == "SPC" then
+			-- 조건: (최소 턴 충족) AND (쿨타임 지남)
+			if currentTurn >= PLAYER_SKILL_CONFIG.SPC.minTurn and 
+				currentTurn >= state.playerNextSpecialTurn then
+
+				-- 사용 성공 -> 쿨타임 갱신
+				state.playerNextSpecialTurn = currentTurn + PLAYER_SKILL_CONFIG.SPC.cooldown + 1
+			else
+				-- 사용 불가(쿨타임 중) -> 행동 취소 (일반 공격이나 스킵으로 대체 가능하나 여기선 스킵)
+				pAct = "-" 
+				print("⚠️ 플레이어 스페셜 쿨타임 중! 행동이 취소되었습니다.")
+			end
+		end
+
+		-- 1. 몬스터의 공격 -> 플레이어
+		if mAct == "ATK" or mAct == "SPC" then
+			local dmg = mStats.atk
+			if mAct == "SPC" then dmg = dmg * 1.5 end 
+
+			if pAct == "BLK" then
+				dmg = math.max(0, dmg - (pStats.def + 5))
+			else
+				dmg = math.max(0, dmg - pStats.def)
+			end
+			pStats.currentHP = math.max(0, pStats.currentHP - dmg)
+		end
+
+		-- 2. 플레이어의 공격 -> 몬스터
+		if pAct == "ATK" or pAct == "SPC" then
+			local dmg = pStats.atk
+			if pAct == "SPC" then dmg = dmg * 2 end 
+
+			if mAct == "BLK" then
+				dmg = math.max(0, dmg - (mStats.def + 5))
+			else
+				dmg = math.max(0, dmg - mStats.def)
+			end
+			mStats.currentHP = math.max(0, mStats.currentHP - dmg)
+		end
+	end
+
+	-- 턴 종료 후 처리
+	state.turnCount = state.turnCount + 1
+	mStats.currentSP = mStats.currentSP + MONSTER_CONFIG.spRegen 
+
+	-- 결과 확인
+	if pStats.currentHP <= 0 then
+		combatEvent:FireClient(player, "End", "LOSE")
+		freezePlayer(player.Character, false)
+		battleState[player.UserId] = nil
+		isBattleActive = false 
+
+	elseif mStats.currentHP <= 0 then
+		combatEvent:FireClient(player, "End", "WIN")
+		freezePlayer(player.Character, false)
+		battleState[player.UserId] = nil
+
+		respawnMonster()
+
+	else
+		-- 다음 턴 준비
+		local nextMonsterActions = generateMonsterActions(player.UserId)
+		state.monsterActions = nextMonsterActions
+
+		local turnData = {
+			monsterActions = nextMonsterActions,
+			playerHP = pStats.currentHP,
+			monsterHP = mStats.currentHP,
+			maxHP_P = pStats.maxHP,
+			maxHP_M = mStats.maxHP
+		}
+		combatEvent:FireClient(player, "NextTurn", turnData)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- 클라이언트로부터 행동 수신
+--------------------------------------------------------------------------------
+combatEvent.OnServerEvent:Connect(function(player, action, data)
+	if action == "SubmitActions" then
+		resolveTurn(player, data)
+	end
+end)
+
+--------------------------------------------------------------------------------
+-- 몬스터 조우 (전투 시작)
+--------------------------------------------------------------------------------
+monster.Touched:Connect(function(hit)
+	if isBattleActive then return end
+	local character = hit.Parent
+	local player = Players:GetPlayerFromCharacter(character)
+
+	if player then
+		isBattleActive = true
+
+		repositionPlayer(character)
+		freezePlayer(character, true)
+
+		battleState[player.UserId] = {
+			turnCount = 1,          
+			monsterNextSpecialTurn = 0, -- 몬스터 쿨타임 추적
+			playerNextSpecialTurn = 0,  -- [추가됨] 플레이어 쿨타임 추적
+
+			playerStats = {
+				maxHP = PLAYER_STATS.maxHP, currentHP = PLAYER_STATS.currentHP,
+				atk = PLAYER_STATS.atk, def = PLAYER_STATS.def
+			},
+			monsterStats = {
+				maxHP = MONSTER_CONFIG.maxHP, currentHP = MONSTER_CONFIG.maxHP,
+				atk = MONSTER_CONFIG.atk, def = MONSTER_CONFIG.def,
+				maxSP = MONSTER_CONFIG.maxSP,
+				currentSP = MONSTER_CONFIG.startSP 
+			},
+			monsterActions = {} 
+		}
+
+		local initialMonsterActions = generateMonsterActions(player.UserId)
+		battleState[player.UserId].monsterActions = initialMonsterActions
+
+		local startData = {
+			monsterName = MONSTER_CONFIG.name,
+			monsterMaxSP = MONSTER_CONFIG.maxSP,
+			monsterActions = initialMonsterActions,
+			playerStats = PLAYER_STATS,
+			monsterStats = battleState[player.UserId].monsterStats
+		}
+
+		combatEvent:FireClient(player, "Start", startData)
+	end
+end)
