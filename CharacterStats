@@ -1,0 +1,45 @@
+local Players = game:GetService("Players")
+
+-- 원하는 속도와 점프력을 여기서 설정하세요
+local WALK_SPEED = 35       -- 기본 속도가 16입니다.
+local JUMP_POWER = 60       -- 기본 점프력이 50입니다.
+local USE_JUMP_POWER = true -- 이걸 true로 해야 JumpHeight 대신 JumpPower를 씁니다.
+
+local function onCharacterAdded(character)
+	-- Humanoid가 로드될 때까지 기다립니다.
+	local humanoid = character:WaitForChild("Humanoid")
+
+	-- 혹시 모를 로딩 지연을 위해 아주 잠깐 기다렸다가 적용 (안전 장치)
+	task.wait(0.1)
+
+	-- 속도 설정
+	humanoid.WalkSpeed = WALK_SPEED
+
+	-- 점프 설정
+	humanoid.UseJumpPower = USE_JUMP_POWER
+	humanoid.JumpPower = JUMP_POWER
+
+	-- (선택사항) 체력 설정
+	humanoid.MaxHealth = 100
+	humanoid.Health = 100
+
+	print(character.Name .. "의 스탯이 설정되었습니다! (속도: " .. WALK_SPEED .. ")")
+end
+
+local function onPlayerAdded(player)
+	-- 캐릭터가 새로 태어날 때마다 함수 연결
+	player.CharacterAdded:Connect(onCharacterAdded)
+
+	-- 스크립트가 실행된 시점에 이미 캐릭터가 있는 경우 즉시 적용
+	if player.Character then
+		onCharacterAdded(player.Character)
+	end
+end
+
+-- 1. 나중에 들어오는 플레이어 처리
+Players.PlayerAdded:Connect(onPlayerAdded)
+
+-- 2. 이미 서버에 들어와 있는 플레이어 처리 (테스트 시 중요)
+for _, player in ipairs(Players:GetPlayers()) do
+	onPlayerAdded(player)
+end
