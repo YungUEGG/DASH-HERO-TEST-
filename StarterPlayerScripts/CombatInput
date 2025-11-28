@@ -1,0 +1,344 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Debris = game:GetService("Debris") 
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local combatEvent = ReplicatedStorage:WaitForChild("CombatEvent")
+
+-- ==============================================================================
+-- [설정]
+-- ==============================================================================
+local COSTS = { ATK = 1, BLK = 1, SPC = 2, SKIP = 0 }
+local TURN_TIME_LIMIT = 10 
+local MONSTER_ANIM_DURATION = 1.5 
+
+-- UI 생성
+local gui = Instance.new("ScreenGui")
+gui.Name = "BattleUI"
+gui.Parent = player:WaitForChild("PlayerGui")
+
+--------------------------------------------------------------------------------
+-- 1. 몬스터 영역 (Top Right)
+--------------------------------------------------------------------------------
+local monsterFrame = Instance.new("Frame")
+monsterFrame.Name = "MonsterFrame"
+monsterFrame.Size = UDim2.new(0.35, 0, 0.25, 0)
+monsterFrame.Position = UDim2.new(0.6, 0, 0.1, 0) -- 오른쪽 위
+monsterFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+monsterFrame.BackgroundTransparency = 0.5
+monsterFrame.Visible = false
+monsterFrame.Parent = gui
+
+-- 몬스터 이름
+local mNameLabel = Instance.new("TextLabel")
+mNameLabel.Size = UDim2.new(1, 0, 0.2, 0)
+mNameLabel.BackgroundTransparency = 1
+mNameLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+mNameLabel.TextSize = 25
+mNameLabel.Font = Enum.Font.GothamBold
+mNameLabel.Text = "Monster"
+mNameLabel.Parent = monsterFrame
+
+-- 몬스터 HP 바
+local mHPBg = Instance.new("Frame")
+mHPBg.Size = UDim2.new(0.8, 0, 0.1, 0)
+mHPBg.Position = UDim2.new(0.1, 0, 0.25, 0)
+mHPBg.BackgroundColor3 = Color3.fromRGB(50, 0, 0)
+mHPBg.Parent = monsterFrame
+
+local mHPBar = Instance.new("Frame")
+mHPBar.Size = UDim2.new(1, 0, 1, 0)
+mHPBar.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+mHPBar.BorderSizePixel = 0
+mHPBar.Parent = mHPBg
+
+local mHPText = Instance.new("TextLabel")
+mHPText.Size = UDim2.new(1, 0, 1.5, 0)
+mHPText.Position = UDim2.new(0,0,-1.5,0)
+mHPText.BackgroundTransparency = 1
+mHPText.TextColor3 = Color3.new(1,1,1)
+mHPText.Text = "HP 50/50"
+mHPText.Parent = mHPBg
+
+-- 몬스터 슬롯 컨테이너
+local monsterSlotContainer = Instance.new("Frame")
+monsterSlotContainer.Size = UDim2.new(0.9, 0, 0.4, 0)
+monsterSlotContainer.Position = UDim2.new(0.05, 0, 0.5, 0)
+monsterSlotContainer.BackgroundTransparency = 1
+monsterSlotContainer.Parent = monsterFrame
+
+
+--------------------------------------------------------------------------------
+-- 2. 플레이어 영역 (Bottom Left)
+--------------------------------------------------------------------------------
+local playerFrame = Instance.new("Frame")
+playerFrame.Name = "PlayerFrame"
+playerFrame.Size = UDim2.new(0.35, 0, 0.25, 0)
+playerFrame.Position = UDim2.new(0.05, 0, 0.7, 0) -- 왼쪽 아래
+playerFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+playerFrame.BackgroundTransparency = 0.5
+playerFrame.Visible = false
+playerFrame.Parent = gui
+
+-- 내 HP 바
+local pHPBg = Instance.new("Frame")
+pHPBg.Size = UDim2.new(0.8, 0, 0.1, 0)
+pHPBg.Position = UDim2.new(0.1, 0, 0.25, 0)
+pHPBg.BackgroundColor3 = Color3.fromRGB(0, 50, 0)
+pHPBg.Parent = playerFrame
+
+local pHPBar = Instance.new("Frame")
+pHPBar.Size = UDim2.new(1, 0, 1, 0)
+pHPBar.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+pHPBar.BorderSizePixel = 0
+pHPBar.Parent = pHPBg
+
+local pHPText = Instance.new("TextLabel")
+pHPText.Size = UDim2.new(1, 0, 1.5, 0)
+pHPText.Position = UDim2.new(0,0,-1.5,0)
+pHPText.BackgroundTransparency = 1
+pHPText.TextColor3 = Color3.new(1,1,1)
+pHPText.Text = "HP 40/40"
+pHPText.Parent = pHPBg
+
+-- 내 슬롯 컨테이너
+local slotContainer = Instance.new("Frame")
+slotContainer.Size = UDim2.new(0.9, 0, 0.4, 0)
+slotContainer.Position = UDim2.new(0.05, 0, 0.5, 0)
+slotContainer.BackgroundTransparency = 1
+slotContainer.Parent = playerFrame
+
+-- SP 및 시간 표시
+local spLabel = Instance.new("TextLabel")
+spLabel.Size = UDim2.new(1, 0, 0.2, 0)
+spLabel.Position = UDim2.new(0, 0, -0.2, 0)
+spLabel.BackgroundTransparency = 1
+spLabel.TextColor3 = Color3.fromRGB(0, 255, 255)
+spLabel.TextSize = 25
+spLabel.Font = Enum.Font.FredokaOne
+spLabel.Text = "SP: 0"
+spLabel.Parent = playerFrame
+
+local timeLabel = Instance.new("TextLabel")
+timeLabel.Size = UDim2.new(1, 0, 0.15, 0)
+timeLabel.Position = UDim2.new(0, 0, -0.4, 0)
+timeLabel.BackgroundTransparency = 1
+timeLabel.TextColor3 = Color3.fromRGB(255, 255, 100)
+timeLabel.TextSize = 20
+timeLabel.Font = Enum.Font.GothamBold
+timeLabel.Text = ""
+timeLabel.Parent = playerFrame
+
+-- 변수들
+local isMyTurn = false
+local currentActions = {}
+local maxSlots = 0
+local currentSP = 0
+local addSP = 2
+local playerBaseSlotCount = 4 
+local turnTimer = nil
+
+--------------------------------------------------------------------------------
+-- 헬퍼 함수들 (UI 업데이트)
+--------------------------------------------------------------------------------
+local function updateHP(pCurr, pMax, mCurr, mMax)
+	-- Tween으로 부드럽게
+	local pPercent = math.clamp(pCurr / pMax, 0, 1)
+	local mPercent = math.clamp(mCurr / mMax, 0, 1)
+
+	pHPBar:TweenSize(UDim2.new(pPercent, 0, 1, 0), "Out", "Quad", 0.3, true)
+	mHPBar:TweenSize(UDim2.new(mPercent, 0, 1, 0), "Out", "Quad", 0.3, true)
+
+	pHPText.Text = "HP " .. pCurr .. "/" .. pMax
+	mHPText.Text = "HP " .. mCurr .. "/" .. mMax
+end
+
+local function updateMySlots()
+	spLabel.Text = "SP: " .. currentSP 
+
+	for _, child in pairs(slotContainer:GetChildren()) do
+		if child:IsA("Frame") then child:Destroy() end
+	end
+
+	local slotWidth = 1 / maxSlots
+	for i = 1, maxSlots do
+		local slot = Instance.new("Frame")
+		slot.Size = UDim2.new(slotWidth, -5, 1, 0)
+		slot.Position = UDim2.new(slotWidth * (i-1), 0, 0, 0)
+		slot.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+		slot.BorderSizePixel = 0
+		slot.Parent = slotContainer
+
+		local text = Instance.new("TextLabel")
+		text.Size = UDim2.new(1,0,1,0)
+		text.BackgroundTransparency = 1
+		text.TextColor3 = Color3.fromRGB(255,255,255)
+		text.TextSize = 18
+		text.Font = Enum.Font.GothamBold
+		text.Parent = slot
+
+		if currentActions[i] then
+			text.Text = currentActions[i]
+			if currentActions[i] == "ATK" then text.TextColor3 = Color3.fromRGB(255,100,100) end
+			if currentActions[i] == "BLK" then text.TextColor3 = Color3.fromRGB(100,100,255) end
+			if currentActions[i] == "SPC" then text.TextColor3 = Color3.fromRGB(255,255,0) end
+		else
+			text.Text = "_"
+		end
+	end
+end
+
+local function playTypeSound()
+	local sound = Instance.new("Sound")
+	sound.SoundId = "rbxassetid://9114724031" -- 클릭/타입 소리
+	sound.Volume = 1.5
+	sound.Parent = game:GetService("SoundService") -- SoundService에서 재생
+	sound:Play()
+	Debris:AddItem(sound, 1)
+end
+
+-- 턴 종료 및 제출
+local function endTurn()
+	if not isMyTurn then return end
+	isMyTurn = false
+	if turnTimer then task.cancel(turnTimer) end
+	timeLabel.Text = ""
+
+	print("🚀 턴 종료! 행동 전송 중...")
+
+	-- [중요] 서버로 내 행동 전송
+	combatEvent:FireServer("SubmitActions", currentActions)
+
+	playerFrame.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+end
+
+local function processAction(actionKey, actionName)
+	local cost = COSTS[actionKey]
+	if currentSP < cost then return end 
+	if #currentActions >= maxSlots then return end 
+
+	currentSP = currentSP - cost
+	table.insert(currentActions, actionName)
+	updateMySlots()
+	playTypeSound()
+
+	if currentSP == 0 or #currentActions == maxSlots then
+		task.wait(0.2)
+		endTurn()
+	end
+end
+
+local function startMyTurn()
+	isMyTurn = true
+	currentActions = {}
+	currentSP = currentSP + addSP 
+
+	updateMySlots()
+	playerFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+
+	turnTimer = task.spawn(function()
+		for i = TURN_TIME_LIMIT, 1, -1 do
+			timeLabel.Text = "TIME: " .. i
+			task.wait(1)
+			if not isMyTurn then return end
+		end
+		timeLabel.Text = "TIME OVER!"
+		endTurn()
+	end)
+end
+
+local function showMonsterPatterns(actions, maxSP)
+	-- 슬롯 초기화
+	for _, child in pairs(monsterSlotContainer:GetChildren()) do
+		child:Destroy()
+	end
+
+	local slotWidth = 1 / maxSlots
+	local interval = MONSTER_ANIM_DURATION / maxSlots
+
+	for i = 1, maxSlots do
+		task.wait(interval)
+		playTypeSound()
+
+		local slot = Instance.new("Frame")
+		slot.Size = UDim2.new(slotWidth, -5, 1, 0)
+		slot.Position = UDim2.new(slotWidth * (i-1), 0, 0, 0)
+		slot.BackgroundColor3 = Color3.fromRGB(80, 40, 40)
+		slot.BorderSizePixel = 0
+		slot.Parent = monsterSlotContainer
+
+		local text = Instance.new("TextLabel")
+		text.Size = UDim2.new(1,0,1,0)
+		text.BackgroundTransparency = 1
+		text.TextColor3 = Color3.fromRGB(255, 200, 200)
+		text.TextSize = 18
+		text.Font = Enum.Font.GothamBold
+		text.Parent = slot
+
+		if actions[i] then text.Text = actions[i] else text.Text = "_" end
+	end
+
+	task.wait(0.5)
+	startMyTurn()
+end
+
+--------------------------------------------------------------------------------
+-- 서버 이벤트 핸들러
+--------------------------------------------------------------------------------
+combatEvent.OnClientEvent:Connect(function(action, data)
+	if action == "Start" then
+		monsterFrame.Visible = true
+		playerFrame.Visible = true
+
+		mNameLabel.Text = data.monsterName
+
+		-- 슬롯 개수 계산
+		maxSlots = math.max(playerBaseSlotCount, data.monsterMaxSP)
+
+		-- HP 초기화
+		updateHP(data.playerStats.currentHP, data.playerStats.maxHP, 
+			data.monsterStats.currentHP, data.monsterStats.maxHP)
+
+		-- 전투 시작 연출
+		showMonsterPatterns(data.monsterActions, data.monsterMaxSP)
+
+	elseif action == "NextTurn" then
+		-- 다음 턴 시작 (HP 업데이트 및 새 패턴)
+		updateHP(data.playerHP, data.maxHP_P, data.monsterHP, data.maxHP_M)
+
+		task.wait(1) -- 데미지 확인 시간
+		showMonsterPatterns(data.monsterActions, #data.monsterActions)
+
+	elseif action == "End" then
+		monsterFrame.Visible = false
+		playerFrame.Visible = false
+		isMyTurn = false
+		if turnTimer then task.cancel(turnTimer) end
+
+		-- 결과 메시지 (승리/패배)
+		local resultLabel = Instance.new("TextLabel")
+		resultLabel.Size = UDim2.new(1,0,0.5,0)
+		resultLabel.Position = UDim2.new(0,0,0.25,0)
+		resultLabel.BackgroundTransparency = 1
+		resultLabel.TextColor3 = data == "WIN" and Color3.new(1,1,0) or Color3.new(1,0,0)
+		resultLabel.TextSize = 80
+		resultLabel.Font = Enum.Font.FredokaOne
+		resultLabel.Text = data == "WIN" and "VICTORY!" or "GAME OVER"
+		resultLabel.Parent = gui
+
+		task.wait(3)
+		resultLabel:Destroy()
+	end
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if not isMyTurn or gameProcessed then return end
+	if input.KeyCode == Enum.KeyCode.Q then processAction("ATK", "ATK")
+	elseif input.KeyCode == Enum.KeyCode.W then processAction("BLK", "BLK")
+	elseif input.KeyCode == Enum.KeyCode.E then processAction("SKIP", "-")
+	elseif input.KeyCode == Enum.KeyCode.R then processAction("SPC", "SPC")
+	elseif input.KeyCode == Enum.KeyCode.T then endTurn()
+	end
+end)
