@@ -1,0 +1,193 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local Debris = game:GetService("Debris") 
+
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local rootPart = character:WaitForChild("HumanoidRootPart")
+
+----------------------------------------------------------------------------------
+-- [설정 1] 애니메이션 ID 설정
+----------------------------------------------------------------------------------
+local SLIDE_ANIM_ID = "118984988587641" 
+local CROUCH_ANIM_ID = "rbxassetid://71858696392173" 
+
+-- [설정 2] 수치 조절
+local SLIDE_SPEED = 65 
+local ORIGINAL_WALK_SPEED = 35 
+local SLIDE_DURATION = 0.4 
+local COOLDOWN = 0.8 
+local HIP_HEIGHT_SLIDE = 0.8 
+-- 시작할 때 원래 키 높이를 딱 한 번만 저장
+local HIP_HEIGHT_NORMAL = humanoid.HipHeight 
+
+-- 상태 변수
+local isSliding = false
+local isCrouching = false
+local lastSlideTime = 0
+
+-- 애니메이션 로드
+local animator = humanoid:WaitForChild("Animator")
+
+-- ID 처리 함수
+local function getId(id)
+	if string.find(id, "rbxassetid://") then return id end
+	return "rbxassetid://" .. id
+end
+
+local slideAnimParams = Instance.new("Animation")
+slideAnimParams.AnimationId = getId(SLIDE_ANIM_ID)
+local slideTrack = animator:LoadAnimation(slideAnimParams)
+slideTrack.Priority = Enum.AnimationPriority.Action4 
+slideTrack.Looped = false
+
+local crouchAnimParams = Instance.new("Animation")
+crouchAnimParams.AnimationId = getId(CROUCH_ANIM_ID)
+local crouchTrack = animator:LoadAnimation(crouchAnimParams)
+crouchTrack.Priority = Enum.AnimationPriority.Action2
+crouchTrack.Looped = true 
+
+--------------------------------------------------------------------------------
+-- 1. 제자리 앉기 (Crouch)
+--------------------------------------------------------------------------------
+function startCrouch() 
+	if isSliding or isCrouching then return end
+	if humanoid.FloorMaterial == Enum.Material.Air then return end
+
+	isCrouching = true
+
+	humanoid.WalkSpeed = 0 
+	humanoid.JumpPower = 0
+	humanoid.HipHeight = HIP_HEIGHT_SLIDE 
+
+	crouchTrack:Play(0.2)
+end
+
+function stopCrouch() 
+	if not isCrouching then return end
+
+	crouchTrack:Stop(0.2)
+
+	humanoid.HipHeight = HIP_HEIGHT_NORMAL
+	humanoid.WalkSpeed = ORIGINAL_WALK_SPEED
+	humanoid.JumpPower = 60
+
+	isCrouching = false
+end
+
+--------------------------------------------------------------------------------
+-- 2. 슬라이딩 시작
+--------------------------------------------------------------------------------
+local function startSlide()
+	if isSliding then return end 
+	if (os.clock() - lastSlideTime < COOLDOWN) then return end
+	if humanoid.FloorMaterial == Enum.Material.Air then return end
+
+	if isCrouching then
+		stopCrouch()
+	end
+
+	isSliding = true
+	lastSlideTime = os.clock()
+	character:SetAttribute("IsSliding", true)
+
+	humanoid.WalkSpeed = 0 
+	humanoid.JumpPower = 0 
+	humanoid.HipHeight = HIP_HEIGHT_SLIDE 
+
+	local bv = Instance.new("BodyVelocity")
+	bv.Name = "SlideVelocity"
+	bv.MaxForce = Vector3.new(100000, 0, 100000)
+	bv.Velocity = rootPart.CFrame.LookVector * SLIDE_SPEED
+	bv.Parent = rootPart
+
+	slideTrack:Play(0.1)
+
+	local sound = Instance.new("Sound")
+	sound.SoundId = "rbxassetid://539294959" 
+	sound.Volume = 0.5
+	sound.Parent = rootPart
+	sound:Play()
+	Debris:AddItem(sound, 1)
+
+	task.delay(SLIDE_DURATION, function()
+		stopSlide(bv)
+	end)
+end
+
+--------------------------------------------------------------------------------
+-- 3. 슬라이딩 종료
+--------------------------------------------------------------------------------
+function stopSlide(bv)
+	if not isSliding then return end
+
+	if bv then bv:Destroy() end
+	if rootPart:FindFirstChild("SlideVelocity") then
+		rootPart.SlideVelocity:Destroy()
+	end
+
+	slideTrack:Stop(0.3)
+
+	isSliding = false
+	character:SetAttribute("IsSliding", false)
+
+	if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+		startCrouch()
+	else
+		humanoid.HipHeight = HIP_HEIGHT_NORMAL
+		humanoid.WalkSpeed = ORIGINAL_WALK_SPEED
+		humanoid.JumpPower = 60 
+	end
+end
+
+--------------------------------------------------------------------------------
+-- 4. 키 입력 핸들러
+--------------------------------------------------------------------------------
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end
+
+	-- Case 1: S키를 눌렀을 때
+	if input.KeyCode == Enum.KeyCode.S then
+		if humanoid.MoveDirection.Magnitude > 0 then
+			startSlide()
+		else
+			startCrouch()
+		end
+
+		-- Case 2: 앉은 상태에서 A 또는 D를 눌렀을 때
+	elseif input.KeyCode == Enum.KeyCode.D or input.KeyCode == Enum.KeyCode.A then
+		if isCrouching then
+			-- [수정됨] 쿨타임 체크 먼저!
+			-- 쿨타임 중이면 절대 일어나지 않고 방향만 돌림
+			if (os.clock() - lastSlideTime < COOLDOWN) then
+				if input.KeyCode == Enum.KeyCode.D then
+					rootPart.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + Vector3.new(1, 0, 0))
+				elseif input.KeyCode == Enum.KeyCode.A then
+					rootPart.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + Vector3.new(-1, 0, 0))
+				end
+				-- stopCrouch()를 부르지 않으므로 계속 앉아있음!
+				return 
+			end
+
+			-- 쿨타임 끝났으면 -> 일어나서 바로 슬라이딩
+			stopCrouch()
+
+			if input.KeyCode == Enum.KeyCode.D then
+				rootPart.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + Vector3.new(1, 0, 0))
+			elseif input.KeyCode == Enum.KeyCode.A then
+				rootPart.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + Vector3.new(-1, 0, 0))
+			end
+
+			startSlide()
+		end
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input, gameProcessed)
+	if input.KeyCode == Enum.KeyCode.S then
+		if isCrouching and not isSliding then
+			stopCrouch()
+		end
+	end
+end)
