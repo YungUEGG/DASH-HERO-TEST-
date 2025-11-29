@@ -1,0 +1,310 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- ==============================================================================
+-- [데이터 설정] 임시 아이템 및 스탯 데이터
+-- ==============================================================================
+local myStats = {
+	Level = 1,
+	Gold = 200,
+	Attack = 10,
+	Health = 100,
+	Defense = 5
+}
+
+-- 아이템 목록 (테스트용)
+local inventoryData = {
+	{ id = 1, name = "Iron Sword", type = "Weapon", stat = "ATK +5", value = 5, icon = "⚔️" },
+	{ id = 2, name = "Wood Shield", type = "Shield", stat = "DEF +3", value = 3, icon = "🛡️" },
+	{ id = 3, name = "Leather Armor", type = "Body", stat = "HP +20", value = 20, icon = "👕" },
+	{ id = 4, name = "Iron Helm", type = "Head", stat = "HP +10", value = 10, icon = "🪖" },
+	{ id = 5, name = "Speed Boots", type = "Shoes", stat = "SPD +2", value = 2, icon = "👢" },
+	{ id = 6, name = "Fire Ball", type = "Special", stat = "SPC +10", value = 10, icon = "🔥" },
+    { id = 7, name = "Potion", type = "Consumable", stat = "HP +50", value = 50, icon = "🧪" },
+}
+
+-- 현재 장착된 아이템
+local equippedData = {
+	Head = nil,
+	Weapon = nil,
+	Body = nil,
+	Shield = nil,
+	Shoes = nil,
+	Special = nil
+}
+
+-- ==============================================================================
+-- [UI 생성] 코드로 UI 그리기 (그림판 디자인 반영)
+-- ==============================================================================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "GameMenuUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
+
+-- 1. 메뉴 버튼 (화면 왼쪽)
+local menuButton = Instance.new("TextButton")
+menuButton.Name = "MenuButton"
+menuButton.Size = UDim2.new(0, 60, 0, 60)
+menuButton.Position = UDim2.new(0, 20, 0.5, -30) -- 왼쪽 중앙
+menuButton.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+menuButton.Text = "MENU"
+menuButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+menuButton.Font = Enum.Font.GothamBold
+menuButton.TextSize = 14
+menuButton.Parent = screenGui
+
+local btnCorner = Instance.new("UICorner")
+btnCorner.CornerRadius = UDim.new(0, 10)
+btnCorner.Parent = menuButton
+
+local btnStroke = Instance.new("UIStroke")
+btnStroke.Thickness = 2
+btnStroke.Color = Color3.fromRGB(255, 255, 255)
+btnStroke.Parent = menuButton
+
+-- 2. 메인 프레임 (전체 창)
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 700, 0, 450)
+mainFrame.Position = UDim2.new(0.5, -350, 0.5, -225) -- 화면 중앙
+mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+mainFrame.Visible = false -- 처음엔 숨김
+mainFrame.Parent = screenGui
+
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 15)
+mainCorner.Parent = mainFrame
+
+local mainStroke = Instance.new("UIStroke")
+mainStroke.Thickness = 3
+mainStroke.Color = Color3.fromRGB(0, 0, 0)
+mainStroke.Parent = mainFrame
+
+-- 드래그 가능하게 설정
+local dragDetector = Instance.new("UIDragDetector")
+dragDetector.Parent = mainFrame
+
+-- 2-1. 인벤토리 섹션 (왼쪽)
+local invSection = Instance.new("Frame")
+invSection.Name = "InventorySection"
+invSection.Size = UDim2.new(0.55, -20, 0.85, -20) -- 왼쪽 55% 차지
+invSection.Position = UDim2.new(0, 20, 0, 20)
+invSection.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+invSection.Parent = mainFrame
+
+local invCorner = Instance.new("UICorner")
+invCorner.CornerRadius = UDim.new(0, 10)
+invCorner.Parent = invSection
+
+local invGrid = Instance.new("ScrollingFrame")
+invGrid.Size = UDim2.new(1, -20, 1, -20)
+invGrid.Position = UDim2.new(0, 10, 0, 10)
+invGrid.BackgroundTransparency = 1
+invGrid.ScrollBarThickness = 6
+invGrid.Parent = invSection
+
+local gridLayout = Instance.new("UIGridLayout")
+gridLayout.CellSize = UDim2.new(0, 70, 0, 70)
+gridLayout.CellPadding = UDim2.new(0, 10, 0, 10)
+gridLayout.Parent = invGrid
+
+-- 2-2. 장비 & 스탯 섹션 (오른쪽)
+local equipSection = Instance.new("Frame")
+equipSection.Name = "EquipSection"
+equipSection.Size = UDim2.new(0.4, -20, 0.7, 0) -- 오른쪽 40% 차지
+equipSection.Position = UDim2.new(0.6, 0, 0, 20)
+equipSection.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+equipSection.Parent = mainFrame
+
+local equipCorner = Instance.new("UICorner")
+equipCorner.CornerRadius = UDim.new(0, 10)
+equipCorner.Parent = equipSection
+
+-- 장비 슬롯 배치 (십자가 모양 + 스페셜/신발)
+local slots = {
+    {Name="Head", Pos=UDim2.new(0.5, -35, 0.1, 0), Icon="🪖"},
+    {Name="Weapon", Pos=UDim2.new(0.2, -35, 0.4, 0), Icon="⚔️"},
+    {Name="Body", Pos=UDim2.new(0.5, -35, 0.4, 0), Icon="👕"},
+    {Name="Shield", Pos=UDim2.new(0.8, -35, 0.4, 0), Icon="🛡️"},
+    {Name="Shoes", Pos=UDim2.new(0.35, -35, 0.7, 0), Icon="👢"},
+    {Name="Special", Pos=UDim2.new(0.65, -35, 0.7, 0), Icon="✨"},
+}
+
+local equipButtons = {} -- 나중에 제어하기 위해 저장
+
+for _, s in ipairs(slots) do
+    local slotBtn = Instance.new("TextButton")
+    slotBtn.Name = s.Name
+    slotBtn.Size = UDim2.new(0, 70, 0, 70)
+    slotBtn.Position = s.Pos
+    slotBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+    slotBtn.Text = s.Icon .. "\n" .. s.Name
+    slotBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+    slotBtn.Font = Enum.Font.GothamBold
+    slotBtn.TextSize = 12
+    slotBtn.Parent = equipSection
+    
+    local sc = Instance.new("UICorner")
+    sc.CornerRadius = UDim.new(0, 8)
+    sc.Parent = slotBtn
+    
+    equipButtons[s.Name] = slotBtn
+end
+
+-- 2-3. 레벨 & 골드 (오른쪽 하단)
+local statFrame = Instance.new("Frame")
+statFrame.Size = UDim2.new(0.4, -20, 0.15, 0)
+statFrame.Position = UDim2.new(0.6, 0, 0.72, 10)
+statFrame.BackgroundTransparency = 1
+statFrame.Parent = mainFrame
+
+local lvlLabel = Instance.new("TextLabel")
+lvlLabel.Size = UDim2.new(0.5, 0, 1, 0)
+lvlLabel.BackgroundTransparency = 1
+lvlLabel.Text = "Lv. " .. myStats.Level
+lvlLabel.TextColor3 = Color3.fromRGB(100, 200, 255) -- 하늘색
+lvlLabel.Font = Enum.Font.GothamBold
+lvlLabel.TextSize = 20
+lvlLabel.TextXAlignment = Enum.TextXAlignment.Left
+lvlLabel.Parent = statFrame
+
+local goldLabel = Instance.new("TextLabel")
+goldLabel.Size = UDim2.new(0.5, 0, 1, 0)
+goldLabel.Position = UDim2.new(0.5, 0, 0, 0)
+goldLabel.BackgroundTransparency = 1
+goldLabel.Text = "G: " .. myStats.Gold
+goldLabel.TextColor3 = Color3.fromRGB(255, 220, 0) -- 노란색
+goldLabel.Font = Enum.Font.GothamBold
+goldLabel.TextSize = 20
+goldLabel.TextXAlignment = Enum.TextXAlignment.Right
+goldLabel.Parent = statFrame
+
+-- 2-4. 탭 버튼 섹션 (오른쪽 하단)
+local tabFrame = Instance.new("Frame")
+tabFrame.Size = UDim2.new(0.4, -20, 0.1, 0)
+tabFrame.Position = UDim2.new(0.6, 0, 0.9, -10)
+tabFrame.BackgroundTransparency = 1
+tabFrame.Parent = mainFrame
+
+local tabs = {"인벤", "스탯", "장식"}
+for i, name in ipairs(tabs) do
+    local tabBtn = Instance.new("TextButton")
+    tabBtn.Size = UDim2.new(0.3, 0, 1, 0)
+    tabBtn.Position = UDim2.new(0.35 * (i-1), 0, 0, 0)
+    tabBtn.BackgroundColor3 = i==1 and Color3.fromRGB(100, 100, 100) or Color3.fromRGB(60, 60, 60)
+    tabBtn.Text = name
+    tabBtn.TextColor3 = Color3.new(1,1,1)
+    tabBtn.Font = Enum.Font.Gotham
+    tabBtn.Parent = tabFrame
+    
+    local tc = Instance.new("UICorner"); tc.Parent = tabBtn
+end
+
+-- ==============================================================================
+-- [기능 구현]
+-- ==============================================================================
+
+-- 장비창 갱신 함수 (버그 수정됨)
+function refreshEquipment()
+    -- 버튼 전체를 순회하면서 상태를 업데이트해야 함 (데이터가 nil인 경우도 처리하기 위해)
+    for slotName, btn in pairs(equipButtons) do
+        local item = equippedData[slotName]
+        
+        if item then
+            -- 장착된 상태
+            btn.Text = item.icon .. "\n" .. item.name .. "\n(" .. item.stat .. ")"
+            btn.BackgroundColor3 = Color3.fromRGB(100, 150, 255) -- 파란색 (장착됨)
+        else
+            -- 비어있는 상태 (원래 아이콘 복구)
+            local defaultIcon = ""
+            for _, s in ipairs(slots) do 
+                if s.Name == slotName then defaultIcon = s.Icon end 
+            end
+            btn.Text = defaultIcon .. "\n" .. slotName
+            btn.BackgroundColor3 = Color3.fromRGB(80, 80, 80) -- 회색 (비어있음)
+        end
+    end
+end
+
+-- 인벤토리 갱신 함수
+local function refreshInventory()
+    -- 기존 아이템 UI 삭제
+    for _, child in pairs(invGrid:GetChildren()) do
+        if child:IsA("TextButton") then child:Destroy() end
+    end
+    
+    -- 인벤토리 데이터로 UI 생성
+    for i, item in ipairs(inventoryData) do
+        local itemBtn = Instance.new("TextButton")
+        itemBtn.Name = item.name
+        itemBtn.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+        itemBtn.Text = item.icon
+        itemBtn.TextSize = 30
+        itemBtn.Parent = invGrid
+        
+        local ic = Instance.new("UICorner"); ic.Parent = itemBtn
+        
+        -- 아이템 이름 & 스탯 라벨
+        local nameLbl = Instance.new("TextLabel")
+        nameLbl.Size = UDim2.new(1,0,0.3,0)
+        nameLbl.Position = UDim2.new(0,0,0.7,0)
+        nameLbl.BackgroundTransparency = 1
+        nameLbl.Text = item.name
+        nameLbl.TextColor3 = Color3.new(1,1,1)
+        nameLbl.TextScaled = true
+        nameLbl.Parent = itemBtn
+        
+        -- [장착 로직] 클릭 시 장착
+        itemBtn.MouseButton1Click:Connect(function()
+            local slotType = item.type
+            
+            -- [수정됨] 이미 장착된 템이 있으면 교체 불가 (먼저 빼야 함)
+            if equippedData[slotType] == nil then
+                -- 장착!
+                equippedData[slotType] = item
+                table.remove(inventoryData, i) -- 인벤에서 제거
+                
+                print("Equipped: " .. item.name)
+                
+                -- UI 갱신
+                refreshInventory()
+                refreshEquipment()
+            else
+                -- 이미 장착 중이면 경고
+                print("⚠️ 이미 장착된 아이템이 있습니다! 먼저 장비를 해제하세요.")
+                -- 시각적 피드백 (버튼 빨간색 깜빡임 등) 추가 가능
+            end
+        end)
+    end
+end
+
+-- 장비 해제 로직 연결
+for slotName, btn in pairs(equipButtons) do
+    btn.MouseButton1Click:Connect(function()
+        local item = equippedData[slotName]
+        if item then
+            -- 해제!
+            equippedData[slotName] = nil
+            table.insert(inventoryData, item) -- 인벤으로 복귀
+            
+            print("Unequipped: " .. item.name)
+            refreshInventory()
+            refreshEquipment()
+        end
+    end)
+end
+
+-- 메뉴 열기/닫기
+menuButton.MouseButton1Click:Connect(function()
+    mainFrame.Visible = not mainFrame.Visible
+end)
+
+-- 초기화
+refreshInventory()
+refreshEquipment()
+
+print("✅ 메뉴 시스템 로드 완료")
