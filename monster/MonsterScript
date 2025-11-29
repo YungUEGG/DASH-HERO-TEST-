@@ -19,6 +19,15 @@ local MONSTER_CONFIG = {
 	respawnTime = 5 
 }
 
+-- [수정됨] 드랍 아이템 및 경험치 설정
+local DROP_CONFIG = {
+	gold = 10,    -- 확정 골드
+	exp = 35,     -- [추가] 획득 경험치 (1레벨 통이 100이니까 3마리 잡으면 렙업)
+	items = {
+		{name = "Red Brick", type = "Material", chance = 0.5, icon = "🧱", stat = "재료"} 
+	}
+}
+
 local SKILL_CONFIG = {
 	ATK = {cost = 1}, 
 	BLK = {cost = 1}, 
@@ -40,7 +49,7 @@ local PLAYER_STATS = {
 local battleState = {} 
 
 --------------------------------------------------------------------------------
--- 기본 기능들 (리스폰, 이동 등)
+-- 기본 기능들
 --------------------------------------------------------------------------------
 local function respawnMonster()
 	monster.Transparency = 1
@@ -90,8 +99,7 @@ local function generateMonsterActions(userId)
 
 	local pattern = {}
 	local actions = {"ATK", "BLK"} 
-	
-	-- 시뮬레이션용 임시 SP (패턴 생성 중에만 씀)
+
 	local simSP = currentSP
 
 	for i = 1, mState.maxSP do
@@ -118,7 +126,7 @@ local function generateMonsterActions(userId)
 end
 
 --------------------------------------------------------------------------------
--- [핵심 수정] 턴 판정 및 '로그' 생성
+-- 턴 판정 및 보상 지급
 --------------------------------------------------------------------------------
 local function resolveTurn(player, playerActions)
 	local state = battleState[player.UserId]
@@ -129,16 +137,14 @@ local function resolveTurn(player, playerActions)
 	local mActions = state.monsterActions
 	local currentTurn = state.turnCount
 
-	-- 이번 턴에 일어난 일을 기록할 장부 (Log)
 	local turnLog = {}
-
 	local maxSlots = math.max(#playerActions, #mActions)
 
 	for i = 1, maxSlots do
 		local pAct = playerActions[i] or "-"
 		local mAct = mActions[i] or "-"
 
-		-- 1. 몬스터 코스트 지불
+		-- 코스트 및 쿨타임 체크 (생략 없이 기존 로직 유지)
 		local mCost = SKILL_CONFIG[mAct] and SKILL_CONFIG[mAct].cost or 0
 		if mStats.currentSP >= mCost then
 			mStats.currentSP = mStats.currentSP - mCost
@@ -146,7 +152,6 @@ local function resolveTurn(player, playerActions)
 			mAct = "-" 
 		end
 
-		-- 2. 플레이어 쿨타임 체크
 		if pAct == "SPC" then
 			if currentTurn >= PLAYER_SKILL_CONFIG.SPC.minTurn and 
 				currentTurn >= state.playerNextSpecialTurn then
@@ -155,12 +160,11 @@ local function resolveTurn(player, playerActions)
 				pAct = "-" 
 			end
 		end
-		
+
 		-- 데미지 계산
 		local pDamageTaken = 0
 		local mDamageTaken = 0
 
-		-- 몬스터 공격 -> 플레이어
 		if mAct == "ATK" or mAct == "SPC" then
 			local dmg = mStats.atk
 			if mAct == "SPC" then dmg = dmg * 1.5 end 
@@ -169,7 +173,6 @@ local function resolveTurn(player, playerActions)
 			pDamageTaken = dmg
 		end
 
-		-- 플레이어 공격 -> 몬스터
 		if pAct == "ATK" or pAct == "SPC" then
 			local dmg = pStats.atk
 			if pAct == "SPC" then dmg = dmg * 2 end 
@@ -178,55 +181,54 @@ local function resolveTurn(player, playerActions)
 			mDamageTaken = dmg
 		end
 
-		-- 실제 HP 적용
 		pStats.currentHP = math.max(0, pStats.currentHP - pDamageTaken)
 		mStats.currentHP = math.max(0, mStats.currentHP - mDamageTaken)
 
-		-- [중요] 이 슬롯에서 일어난 일을 기록해서 저장!
 		table.insert(turnLog, {
-			slot = i,
-			pAction = pAct,
-			mAction = mAct,
-			pDmg = pDamageTaken,
-			mDmg = mDamageTaken
+			slot = i, pAction = pAct, mAction = mAct, pDmg = pDamageTaken, mDmg = mDamageTaken
 		})
 	end
 
-	-- 턴 종료 처리
 	state.turnCount = state.turnCount + 1
 	mStats.currentSP = mStats.currentSP + MONSTER_CONFIG.spRegen 
 
-	-- 다음 턴 패턴 미리 생성
 	local nextMonsterActions = generateMonsterActions(player.UserId)
 	state.monsterActions = nextMonsterActions
 
-	-- 클라이언트에게 보낼 데이터 패키지
 	local resultData = {
-		turnLog = turnLog, -- 상세 기록 (애니메이션용)
-		
-		-- 최종 결과 (애니메이션 끝난 후 보정용)
-		finalPHP = pStats.currentHP, 
-		finalMHP = mStats.currentHP,
-		pMax = pStats.maxHP,
-		mMax = mStats.maxHP,
-		
+		turnLog = turnLog,
+		finalPHP = pStats.currentHP, finalMHP = mStats.currentHP,
+		pMax = pStats.maxHP, mMax = mStats.maxHP,
 		nextPattern = nextMonsterActions,
-		gameResult = nil -- "WIN", "LOSE", or nil
+		gameResult = nil
 	}
 
 	if pStats.currentHP <= 0 then resultData.gameResult = "LOSE" end
 	if mStats.currentHP <= 0 then resultData.gameResult = "WIN" end
 
-	-- "ShowResult" 라는 새로운 신호로 보냄
 	combatEvent:FireClient(player, "ShowResult", resultData)
 
-	-- 게임 끝났으면 정리 (메모리만 정리, 실제 종료 신호는 EndBattle 이벤트에서 처리)
 	if resultData.gameResult then
 		battleState[player.UserId] = nil
 		if resultData.gameResult == "WIN" then 
+			-- [수정됨] 보상 데이터 생성 (경험치 포함)
+			local rewardData = {
+				gold = DROP_CONFIG.gold,
+				exp = DROP_CONFIG.exp, -- 경험치 추가
+				items = {}
+			}
+
+			for _, itemInfo in ipairs(DROP_CONFIG.items) do
+				if math.random() <= itemInfo.chance then
+					table.insert(rewardData.items, itemInfo)
+				end
+			end
+
+			-- 클라이언트로 보상 전송
+			combatEvent:FireClient(player, "Reward", rewardData)
+
 			respawnMonster() 
 		else
-			-- [수정] 패배 시에도 전투 상태를 풀어줘야 다시 싸울 수 있음
 			isBattleActive = false 
 		end
 	end
@@ -238,10 +240,9 @@ end
 combatEvent.OnServerEvent:Connect(function(player, action, data)
 	if action == "SubmitActions" then
 		resolveTurn(player, data)
-	-- [추가됨] 클라이언트가 결과 애니메이션을 다 봤다고 신호 보냄
 	elseif action == "EndBattle" then
-		freezePlayer(player.Character, false) -- 플레이어 움직임 봉인 해제
-		combatEvent:FireClient(player, "End") -- 카메라 복구 명령
+		freezePlayer(player.Character, false)
+		combatEvent:FireClient(player, "End")
 	end
 end)
 
@@ -255,23 +256,16 @@ monster.Touched:Connect(function(hit)
 		repositionPlayer(character)
 		freezePlayer(character, true)
 
-		-- 초기 상태 설정
 		local initialActions = generateMonsterActions(player.UserId) 
-		-- generateMonsterActions 내부 로직상 state가 필요하므로 순서 조정 필요하지만,
-		-- 여기선 간단히 먼저 state 만들고 호출
-		
+
 		battleState[player.UserId] = {
 			turnCount = 1,          
 			monsterNextSpecialTurn = 0,
 			playerNextSpecialTurn = 0,
 			playerStats = { maxHP=PLAYER_STATS.maxHP, currentHP=PLAYER_STATS.currentHP, atk=PLAYER_STATS.atk, def=PLAYER_STATS.def },
 			monsterStats = { maxHP=MONSTER_CONFIG.maxHP, currentHP=MONSTER_CONFIG.maxHP, atk=MONSTER_CONFIG.atk, def=MONSTER_CONFIG.def, maxSP=MONSTER_CONFIG.maxSP, currentSP=MONSTER_CONFIG.startSP },
-			monsterActions = {}
+			monsterActions = initialActions 
 		}
-		
-		-- 진짜 패턴 생성
-		initialActions = generateMonsterActions(player.UserId)
-		battleState[player.UserId].monsterActions = initialActions
 
 		local startData = {
 			monsterName = MONSTER_CONFIG.name,
