@@ -1,12 +1,14 @@
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+local combatEvent = ReplicatedStorage:WaitForChild("CombatEvent")
 
 -- ==============================================================================
--- [데이터 설정] 임시 아이템 및 스탯 데이터
+-- [데이터 설정]
 -- ==============================================================================
 local myStats = {
 	Level = 1,
@@ -16,7 +18,7 @@ local myStats = {
 	Defense = 5
 }
 
--- 아이템 목록 (테스트용)
+-- 아이템 목록 (초기 데이터)
 local inventoryData = {
 	{ id = 1, name = "Iron Sword", type = "Weapon", stat = "ATK +5", value = 5, icon = "⚔️" },
 	{ id = 2, name = "Wood Shield", type = "Shield", stat = "DEF +3", value = 3, icon = "🛡️" },
@@ -25,6 +27,10 @@ local inventoryData = {
 	{ id = 5, name = "Speed Boots", type = "Shoes", stat = "SPD +2", value = 2, icon = "👢" },
 	{ id = 6, name = "Fire Ball", type = "Special", stat = "SPC +10", value = 10, icon = "🔥" },
     { id = 7, name = "Potion", type = "Consumable", stat = "HP +50", value = 50, icon = "🧪" },
+    -- 테스트용 중복 아이템
+    { id = 8, name = "Potion", type = "Consumable", stat = "HP +50", value = 50, icon = "🧪" },
+    { id = 9, name = "Red Brick", type = "Material", stat = "재료", value = 0, icon = "🧱" },
+    { id = 10, name = "Red Brick", type = "Material", stat = "재료", value = 0, icon = "🧱" },
 }
 
 -- 현재 장착된 아이템
@@ -37,15 +43,18 @@ local equippedData = {
 	Special = nil
 }
 
+-- 현재 선택된 탭 ("Equip" | "Stat" | "Material")
+local currentTab = "Equip" 
+
 -- ==============================================================================
--- [UI 생성] 반응형(Scale) 디자인 적용
+-- [UI 생성]
 -- ==============================================================================
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "GameMenuUI"
 screenGui.ResetOnSpawn = false
 screenGui.Parent = playerGui
 
--- 1. 메뉴 버튼 (화면 왼쪽)
+-- 1. 메뉴 버튼
 local menuButton = Instance.new("TextButton")
 menuButton.Name = "MenuButton"
 menuButton.Size = UDim2.new(0.08, 0, 0.1, 0) 
@@ -71,7 +80,7 @@ btnStroke.Thickness = 2
 btnStroke.Color = Color3.fromRGB(255, 255, 255)
 btnStroke.Parent = menuButton
 
--- 2. 메인 프레임 (전체 창)
+-- 2. 메인 프레임
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainFrame"
 mainFrame.Size = UDim2.new(0.6, 0, 0.6, 0) 
@@ -114,7 +123,6 @@ invGrid.Size = UDim2.new(0.95, 0, 0.95, 0)
 invGrid.Position = UDim2.new(0.025, 0, 0.025, 0)
 invGrid.BackgroundTransparency = 1
 invGrid.ScrollBarThickness = 6
--- [수정됨] 스크롤이 자동으로 늘어나도록 설정 (중요)
 invGrid.AutomaticCanvasSize = Enum.AutomaticSize.Y
 invGrid.CanvasSize = UDim2.new(0, 0, 0, 0) 
 invGrid.Parent = invSection
@@ -122,21 +130,15 @@ invGrid.Parent = invSection
 local gridLayout = Instance.new("UIGridLayout")
 gridLayout.Parent = invGrid
 
--- [중요 수정] 셀 크기를 '픽셀(Offset)'로 강제 고정하는 함수
+-- 그리드 크기 자동 조절
 local function updateGrid()
 	local gridWidth = invGrid.AbsoluteSize.X
 	if gridWidth <= 0 then return end
-
-	-- 한 줄에 5개 들어가도록 계산 (가로의 18% 정도 크기)
 	local sizePx = gridWidth * 0.18
 	local paddingPx = gridWidth * 0.015
-	
-	-- X, Y 모두 픽셀(Offset)로 설정 -> 절대 찌그러지지 않음
 	gridLayout.CellSize = UDim2.new(0, sizePx, 0, sizePx)
 	gridLayout.CellPadding = UDim2.new(0, paddingPx, 0, paddingPx)
 end
-
--- 화면 크기가 바뀔 때마다 실행
 invGrid:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateGrid)
 
 -- 2-2. 장비 & 스탯 섹션 (오른쪽)
@@ -152,7 +154,6 @@ equipCorner.CornerRadius = UDim.new(0.02, 0)
 equipCorner.Parent = equipSection
 
 local slotSize = UDim2.new(0.25, 0, 0.25, 0) 
-
 local slots = {
     {Name="Head", Pos=UDim2.new(0.5, 0, 0.12, 0), Icon="🪖"},
     {Name="Weapon", Pos=UDim2.new(0.2, 0, 0.42, 0), Icon="⚔️"},
@@ -163,7 +164,6 @@ local slots = {
 }
 
 local equipButtons = {} 
-
 for _, s in ipairs(slots) do
     local slotBtn = Instance.new("TextButton")
     slotBtn.Name = s.Name
@@ -198,7 +198,7 @@ statFrame.Parent = mainFrame
 local lvlLabel = Instance.new("TextLabel")
 lvlLabel.Size = UDim2.new(0.5, 0, 1, 0)
 lvlLabel.BackgroundTransparency = 1
-lvlLabel.Text = "Lv. " .. myStats.Level
+lvlLabel.Text = "Lv. 1" 
 lvlLabel.TextColor3 = Color3.fromRGB(100, 200, 255) 
 lvlLabel.Font = Enum.Font.GothamBold
 lvlLabel.TextScaled = true
@@ -209,27 +209,63 @@ local goldLabel = Instance.new("TextLabel")
 goldLabel.Size = UDim2.new(0.5, 0, 1, 0)
 goldLabel.Position = UDim2.new(0.5, 0, 0, 0)
 goldLabel.BackgroundTransparency = 1
-goldLabel.Text = "G: " .. myStats.Gold
+goldLabel.Text = "G: 0" 
 goldLabel.TextColor3 = Color3.fromRGB(255, 220, 0) 
 goldLabel.Font = Enum.Font.GothamBold
 goldLabel.TextScaled = true
 goldLabel.TextXAlignment = Enum.TextXAlignment.Right
 goldLabel.Parent = statFrame
 
--- 2-4. 탭 버튼 섹션 (오른쪽 하단)
+-- [추가됨] 스탯 상세 정보창 (스탯 탭 누를 때 보임)
+local detailStatFrame = Instance.new("Frame")
+detailStatFrame.Name = "DetailStatFrame"
+detailStatFrame.Size = UDim2.new(0.55, 0, 0.85, 0) -- 인벤토리 자리에 표시
+detailStatFrame.Position = UDim2.new(0.03, 0, 0.05, 0)
+detailStatFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+detailStatFrame.Visible = false
+detailStatFrame.Parent = mainFrame
+
+local dStatCorner = Instance.new("UICorner")
+dStatCorner.CornerRadius = UDim.new(0.02, 0)
+dStatCorner.Parent = detailStatFrame
+
+local detailText = Instance.new("TextLabel")
+detailText.Size = UDim2.new(0.9, 0, 0.9, 0)
+detailText.Position = UDim2.new(0.05, 0, 0.05, 0)
+detailText.BackgroundTransparency = 1
+detailText.TextColor3 = Color3.new(1,1,1)
+detailText.Font = Enum.Font.GothamBold
+detailText.TextScaled = true
+detailText.TextXAlignment = Enum.TextXAlignment.Left
+detailText.TextYAlignment = Enum.TextYAlignment.Top
+detailText.Text = "STATS INFO..."
+detailText.Parent = detailStatFrame
+
+-- 2-4. 탭 버튼 섹션 (수정됨)
 local tabFrame = Instance.new("Frame")
 tabFrame.Size = UDim2.new(0.38, 0, 0.08, 0)
 tabFrame.Position = UDim2.new(0.6, 0, 0.88, 0)
 tabFrame.BackgroundTransparency = 1
 tabFrame.Parent = mainFrame
 
-local tabs = {"인벤", "스탯", "장식"}
-for i, name in ipairs(tabs) do
+-- 탭 설정: 장신구(Equip), 스탯(Stat), 재료(Material)
+local tabData = {
+	{id="Equip", name="장신구"},
+	{id="Stat", name="스탯"},
+	{id="Material", name="재료"}
+}
+local tabButtons = {}
+
+-- 탭 전환 및 화면 갱신 함수 (선언만, 구현은 아래에)
+local refreshUI
+
+for i, t in ipairs(tabData) do
     local tabBtn = Instance.new("TextButton")
+    tabBtn.Name = t.id
     tabBtn.Size = UDim2.new(0.3, 0, 1, 0)
     tabBtn.Position = UDim2.new(0.35 * (i-1), 0, 0, 0)
-    tabBtn.BackgroundColor3 = i==1 and Color3.fromRGB(100, 100, 100) or Color3.fromRGB(60, 60, 60)
-    tabBtn.Text = name
+    tabBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    tabBtn.Text = t.name
     tabBtn.TextColor3 = Color3.new(1,1,1)
     tabBtn.Font = Enum.Font.Gotham
     tabBtn.TextScaled = true
@@ -238,16 +274,34 @@ for i, name in ipairs(tabs) do
     local tc = Instance.new("UICorner")
     tc.CornerRadius = UDim.new(0.3, 0)
     tc.Parent = tabBtn
+	
+	-- 탭 클릭 이벤트
+	tabBtn.MouseButton1Click:Connect(function()
+		currentTab = t.id
+		refreshUI() -- 화면 갱신
+	end)
+	
+	tabButtons[t.id] = tabBtn
 end
 
 -- ==============================================================================
 -- [기능 구현]
 -- ==============================================================================
 
+local function refreshStats()
+	lvlLabel.Text = "Lv. " .. myStats.Level
+	goldLabel.Text = "G: " .. myStats.Gold
+	
+	-- 상세 스탯창 텍스트 업데이트
+	detailText.Text = string.format(
+		"📊 PLAYER STATS\n\n⚔️ Attack: %d\n🛡️ Defense: %d\n❤️ Max HP: %d\n💰 Gold: %d\n✨ Level: %d",
+		myStats.Attack, myStats.Defense, myStats.Health, myStats.Gold, myStats.Level
+	)
+end
+
 function refreshEquipment()
     for slotName, btn in pairs(equipButtons) do
         local item = equippedData[slotName]
-        
         if item then
             btn.Text = item.icon .. "\n" .. item.name .. "\n(" .. item.stat .. ")"
             btn.BackgroundColor3 = Color3.fromRGB(100, 150, 255) 
@@ -262,12 +316,46 @@ function refreshEquipment()
     end
 end
 
+-- [핵심] 인벤토리 갱신 (탭 필터링 + 중복 겹치기 적용)
 local function refreshInventory()
+    -- 기존 아이템 UI 삭제
     for _, child in pairs(invGrid:GetChildren()) do
         if child:IsA("TextButton") then child:Destroy() end
     end
     
-    for i, item in ipairs(inventoryData) do
+	-- 1. 아이템 그룹화 (이름 기준으로 개수 세기)
+	local groupedItems = {} -- { "Iron Sword": {count=1, item=data}, ... }
+	local displayList = {}  -- 순서 유지를 위한 리스트
+	
+	for _, item in ipairs(inventoryData) do
+		-- 탭 필터링 로직
+		local showItem = false
+		if currentTab == "Equip" then
+			-- 장신구 탭: 재료가 아닌 것들 (장비 + 소비템)
+			if item.type ~= "Material" then showItem = true end
+		elseif currentTab == "Material" then
+			-- 재료 탭: 재료만
+			if item.type == "Material" then showItem = true end
+		end
+		
+		if showItem then
+			if not groupedItems[item.name] then
+				-- 새로운 아이템 발견
+				local entry = { count = 1, data = item }
+				groupedItems[item.name] = entry
+				table.insert(displayList, entry)
+			else
+				-- 이미 있는 아이템 -> 개수 증가
+				groupedItems[item.name].count = groupedItems[item.name].count + 1
+			end
+		end
+	end
+    
+    -- 2. 그룹화된 아이템 표시
+    for _, entry in ipairs(displayList) do
+		local item = entry.data
+		local count = entry.count
+		
         local itemBtn = Instance.new("TextButton")
         itemBtn.Name = item.name
         itemBtn.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
@@ -277,8 +365,7 @@ local function refreshInventory()
         
         local ic = Instance.new("UICorner"); ic.Parent = itemBtn
         
-        -- UIAspectRatioConstraint 필요 없음 (Offset으로 정확히 맞춤)
-        
+        -- 이름 표시
         local nameLbl = Instance.new("TextLabel")
         nameLbl.Size = UDim2.new(1,0,0.3,0)
         nameLbl.Position = UDim2.new(0,0,0.7,0)
@@ -287,18 +374,44 @@ local function refreshInventory()
         nameLbl.TextColor3 = Color3.new(1,1,1)
         nameLbl.TextScaled = true
         nameLbl.Parent = itemBtn
+		
+		-- [추가됨] 수량 표시 (x2, x3...)
+		if count > 1 then
+			local countLbl = Instance.new("TextLabel")
+			countLbl.Size = UDim2.new(0.4, 0, 0.4, 0)
+			countLbl.Position = UDim2.new(1, -2, 1, -2) -- 오른쪽 아래
+			countLbl.AnchorPoint = Vector2.new(1, 1)
+			countLbl.BackgroundTransparency = 1
+			countLbl.Text = "x" .. count
+			countLbl.TextColor3 = Color3.fromRGB(255, 255, 0) -- 노란색
+			countLbl.TextStrokeTransparency = 0 -- 테두리 추가해서 잘 보이게
+			countLbl.Font = Enum.Font.GothamBlack
+			countLbl.TextScaled = true
+			countLbl.Parent = itemBtn
+		end
         
+        -- 클릭 이벤트 (장착)
         itemBtn.MouseButton1Click:Connect(function()
+            if item.type == "Material" then
+                print("⛔ 재료 아이템은 장착할 수 없습니다.")
+                return
+            end
+
             local slotType = item.type
-            
             if equippedData[slotType] == nil then
+				-- 실제 인벤토리 배열에서 해당 아이템을 찾아 하나만 제거
+				for idx, v in ipairs(inventoryData) do
+					if v.name == item.name then
+						table.remove(inventoryData, idx)
+						break
+					end
+				end
+				
+				-- 장착
                 equippedData[slotType] = item
-                table.remove(inventoryData, i) 
-                
                 print("Equipped: " .. item.name)
-                
-                refreshInventory()
-                refreshEquipment()
+				
+                refreshUI() -- 전체 갱신
             else
                 print("⚠️ 이미 장착된 아이템이 있습니다! 먼저 장비를 해제하세요.")
             end
@@ -306,6 +419,32 @@ local function refreshInventory()
     end
 end
 
+-- 통합 UI 갱신 함수
+refreshUI = function()
+	-- 탭 버튼 색상 업데이트
+	for id, btn in pairs(tabButtons) do
+		if id == currentTab then
+			btn.BackgroundColor3 = Color3.fromRGB(100, 100, 100) -- 선택됨 (밝게)
+		else
+			btn.BackgroundColor3 = Color3.fromRGB(60, 60, 60) -- 선택 안됨 (어둡게)
+		end
+	end
+	
+	-- 섹션 보이기/숨기기
+	if currentTab == "Stat" then
+		invSection.Visible = false
+		detailStatFrame.Visible = true
+	else
+		invSection.Visible = true
+		detailStatFrame.Visible = false
+		refreshInventory() -- 인벤토리 내용 갱신 (필터링 적용)
+	end
+	
+	refreshEquipment()
+	refreshStats()
+end
+
+-- 장비 해제 로직
 for slotName, btn in pairs(equipButtons) do
     btn.MouseButton1Click:Connect(function()
         local item = equippedData[slotName]
@@ -314,8 +453,7 @@ for slotName, btn in pairs(equipButtons) do
             table.insert(inventoryData, item) 
             
             print("Unequipped: " .. item.name)
-            refreshInventory()
-            refreshEquipment()
+            refreshUI()
         end
     end)
 end
@@ -323,15 +461,35 @@ end
 menuButton.MouseButton1Click:Connect(function()
     mainFrame.Visible = not mainFrame.Visible
     if mainFrame.Visible then 
-        task.wait(0.01) -- 아주 잠깐 대기 후 그리드 갱신 (렌더링 타이밍 문제 방지)
+        task.wait(0.01) 
         updateGrid() 
+		refreshUI()
     end
 end)
 
-refreshInventory()
-refreshEquipment()
+combatEvent.OnClientEvent:Connect(function(action, data)
+	if action == "Reward" then
+		if data.gold then
+			myStats.Gold = myStats.Gold + data.gold
+		end
+		if data.items then
+			for _, newItemData in ipairs(data.items) do
+				table.insert(inventoryData, {
+					id = os.time(),
+					name = newItemData.name,
+					type = newItemData.type,
+					stat = newItemData.stat,
+					value = 0,
+					icon = newItemData.icon
+				})
+			end
+		end
+		refreshUI()
+	end
+end)
 
 -- 초기 실행
 updateGrid()
+refreshUI()
 
-print("✅ 반응형 메뉴 시스템 로드 완료")
+print("✅ 메뉴 시스템 업그레이드 완료 (스택/탭 기능)")
